@@ -1,0 +1,14 @@
+- [x] `diagnostic/state.py` 包含规范中定义的完整 `DiagnosticState` 结构和 TypedDict
+- [x] `diagnostic/config.py` 配置正确定义并支持与现有 `Settings` 集成
+- [x] `diagnostic/prompts/registry.py` 支持运行时 Prompt 注入和验证
+- [x] `diagnostic/tools/registry.py` 支持渐进式披露机制
+- [x] `topology/` 目录能够进行基本的 ECU 拓扑数据库操作 (SQLite)
+- [x] `ParserAgent` 具备数据提取和云端降级机制，处理异常输入时不崩溃
+- [x] `SurveyorAgent` 能够根据 ECU ID 获取拓扑子图
+- [x] `MCPLibrarianAgent` 能够正确调用现有的 `RAGClient`
+- [x] `RCAEngine` 能在限定步骤内完成推理，提取置信度，并调用配置好的工具
+- [x] `AuditorAgent` 实现物理逻辑、拓扑和覆盖率检查
+- [x] `diagnostic/hitl/handler.py` 能够根据不同卡点正确更新状态和记录反馈
+- [x] `diagnostic/graph.py` 的流程路由符合规范中的状态机图定义，无断链或死循环
+- [x] `api/` 下的 FastAPI 应用能正常启动并暴露指定的端点
+- [x] 所有新编写的测试 (`tests/`) 执行通过

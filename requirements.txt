@@ -1,0 +1,14 @@
+langgraph==1.0.9
+langgraph-checkpoint-sqlite
+langchain==1.2.10
+langchain-core==1.2.15
+langchain-openai==1.1.10
+httpx==0.28.1
+pydantic==2.12.0
+python-dotenv==1.2.1
+mcp==1.26.0
+chromadb==1.5.2
+loguru==0.7.3
+deepdiff==8.6.1
+fastapi==0.133.0
+uvicorn==0.40.0

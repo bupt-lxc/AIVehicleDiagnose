@@ -1,0 +1,1 @@
+# app/diagnostic/__init__.py
