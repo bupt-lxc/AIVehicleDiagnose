@@ -131,6 +131,7 @@ class ReportGenerator:
             return {
                 **state,
                 "final_report": final_report,
+                "report_markdown": markdown_report,
                 "follow_up_question": "报告已生成。是否继续分析新的电检报告，或基于当前报告换一个方向深挖（如通信链路/时间线/特定ECU）？",
                 "conversation_suggestion": [
                     "继续分析新报告",

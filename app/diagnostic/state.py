@@ -195,12 +195,15 @@ class DiagnosticState(TypedDict):
     degraded_mode: bool                        # 本地降级模式
     knowledge_degraded: bool                   # 知识检索降级模式
     
+    # === 报告内容 ===
+    report_markdown: str | None        # LLM 生成的 Markdown 报告原文
+
     # === 元数据 ===
     thread_id: str                     # 会话 ID
     run_id: str                        # 运行 ID
     started_at: str                    # 开始时间
     finished_at: str | None            # 结束时间
-    
+
     # === LangChain 消息 ===
     messages: Annotated[list[AnyMessage], add_messages]
 
@@ -252,6 +255,7 @@ def create_initial_state(
         report_approved=False,
         follow_up_question="",
         conversation_suggestion=[],
+        report_markdown=None,
         hitl_required=False,
         current_hitl_point=None,
         hitl_question="",

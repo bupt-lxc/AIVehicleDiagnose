@@ -62,9 +62,12 @@ class OpenAICompatibleProvider:
 
     def _candidate_models(self) -> list[str]:
         env_models = [item.strip() for item in os.getenv("ONLINE_LLM_FALLBACK_MODELS", "").split(",") if item.strip()]
-        defaults = ["qwen-turbo", "qwen-max", "qwen-plus"]
+        is_deepseek = "deepseek" in self._profile.base_url.lower()
+        defaults = ["deepseek-v4-flash"] if is_deepseek else ["qwen-turbo", "qwen-max", "qwen-plus"]
         ordered = [m for m in [self._profile.model] if m]  # Filter empty strings
         for model in env_models + defaults:
+            if is_deepseek and not model.lower().startswith("deepseek"):
+                continue
             if model not in ordered:
                 ordered.append(model)
         
@@ -81,6 +84,16 @@ class OpenAICompatibleProvider:
         error_text = exc.response.text.lower()
         markers = ("model", "not support", "exhausted", "quota", "forbidden", "invalid", "arrearage", "access denied", "account")
         return any(marker in error_text for marker in markers)
+
+    def _format_http_error(self, exc: Any) -> str:
+        status = exc.response.status_code
+        text = str(getattr(exc.response, "text", "") or "").strip()
+        if not text:
+            return f"HTTP Error {status}"
+        preview = text.replace("\r", " ").replace("\n", " ")
+        if len(preview) > 500:
+            preview = preview[:497] + "..."
+        return f"HTTP Error {status}: {preview}"
 
     def _post_completion(
         self,
@@ -131,6 +144,9 @@ class OpenAICompatibleProvider:
                 content = content_value if isinstance(content_value, str) else ""
                 tool_calls = item.get("tool_calls")
                 normalized_item = {"role": "assistant", "content": content}
+                reasoning_content = item.get("reasoning_content")
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    normalized_item["reasoning_content"] = reasoning_content
                 if isinstance(tool_calls, list) and tool_calls:
                     normalized_item["tool_calls"] = tool_calls
                 if not content and not normalized_item.get("tool_calls"):
@@ -191,7 +207,7 @@ class OpenAICompatibleProvider:
                 break
             except Exception as exc:
                 if httpx is not None and isinstance(exc, httpx.HTTPStatusError):
-                    final_exc = RuntimeError(f"HTTP Error {exc.response.status_code}")
+                    final_exc = RuntimeError(self._format_http_error(exc))
                     if index >= len(candidates) - 1 or not self._should_try_next_model(exc):
                         break
                     continue

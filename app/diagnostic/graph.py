@@ -353,6 +353,17 @@ class AutoDiagnoseGraph:
                         })
 
                         final_state = await _astream_with_polling(None)
+                    elif current_node == "hitl_report_approval":
+                        logger.info("[Graph] Auto-approving report in non-interactive mode")
+                        processed = self.hitl_handler.process_feedback(final_state, "A", None)
+                        await self.graph.aupdate_state(run_config, {
+                            "hitl_feedbacks": processed.get("hitl_feedbacks", []),
+                            "hitl_required": processed.get("hitl_required", False),
+                            "current_hitl_point": processed.get("current_hitl_point"),
+                            "report_approved": processed.get("report_approved", False),
+                        })
+                        final_state = await _astream_with_polling(None)
+                        resume_count += 1
                     else:
                         logger.warning(f"[Graph] Stopped at HITL node {current_node} (interactive=False)")
                         break

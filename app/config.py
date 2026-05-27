@@ -77,6 +77,9 @@ def _read_online_api_key() -> str:
     online_api_key = os.getenv("ONLINE_LLM_API_KEY", "").strip()
     if online_api_key:
         return online_api_key
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    if deepseek_api_key:
+        return deepseek_api_key
     return os.getenv("DASHSCOPE_API_KEY", "").strip()
 
 

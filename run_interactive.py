@@ -14,6 +14,14 @@ import json
 import time
 from pathlib import Path
 
+# Fix Windows console encoding for Chinese characters
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from loguru import logger
@@ -236,10 +244,11 @@ async def run_interactive(xml_path: str, user_context: str = "", auto: bool = Fa
     # Settings
     settings = load_settings()
     settings.default_profile = "online"
-    os.environ["ONLINE_LLM_FALLBACK_MODELS"] = ",".join([
-        "qwen3-max-2025-09-23", "qwen-plus-2025-12-01", "qwen-turbo-latest",
-        "qwen2.5-32b-instruct", "qwen-plus-2025-04-28", "qwen-plus-2025-01-25",
-    ])
+    if "deepseek" not in settings.online_profile.base_url.lower():
+        os.environ["ONLINE_LLM_FALLBACK_MODELS"] = ",".join([
+            "qwen3-max-2025-09-23", "qwen-plus-2025-12-01", "qwen-turbo-latest",
+            "qwen2.5-32b-instruct", "qwen-plus-2025-04-28", "qwen-plus-2025-01-25",
+        ])
 
     # Topology DB path
     topology_db = _PROJECT_ROOT / "vehicle_info" / "vehicle_architecture.db"
@@ -267,7 +276,12 @@ async def run_interactive(xml_path: str, user_context: str = "", auto: bool = Fa
     parser_agent = EnrichedParserAgent(cloud_llm=cloud_llm, prompt_registry=prompt_registry)
     surveyor_agent = SurveyorAgent(config={"topology_depth": 1})
     mcp_librarian = LocalMCPLibrarianAgent(rag_client=None)
-    rca_engine = RCAEngine(llm=cloud_llm, prompt_registry=prompt_registry, tool_registry=tool_registry, config=RCAConfig(verbose=True))
+    rca_engine = RCAEngine(
+        llm=cloud_llm,
+        prompt_registry=prompt_registry,
+        tool_registry=tool_registry,
+        config=RCAConfig(verbose=True, timeout_seconds=300.0),
+    )
     auditor_agent = AuditorAgent(llm=cloud_llm, prompt_registry=prompt_registry)
     report_generator = ReportGenerator(llm=cloud_llm, prompt_registry=prompt_registry)
     print(f"  {G}[✓]{X} Agent 初始化完成")
@@ -456,7 +470,7 @@ async def run_interactive(xml_path: str, user_context: str = "", auto: bool = Fa
 
         elapsed = time.time() - start_time
 
-        report = final_state.get("final_report", {})
+        report = final_state.get("final_report") or {}
         print_final_report(report)
         print(f"\n{D}总耗时:{X} {elapsed:.1f}秒")
 
@@ -466,10 +480,11 @@ async def run_interactive(xml_path: str, user_context: str = "", auto: bool = Fa
             json.dump(dict(final_state) if hasattr(final_state, '__iter__') else final_state, f, ensure_ascii=False, indent=2, default=str)
         print(f"\n{G}[保存]{X} 完整报告: {report_path.absolute()}")
 
-        if report.get("report_markdown"):
+        markdown_report = final_state.get("report_markdown")
+        if markdown_report:
             md_path = Path("logs/diagnostic_report.md")
             with open(md_path, "w", encoding="utf-8") as f:
-                f.write(report["report_markdown"])
+                f.write(markdown_report)
             print(f"{G}[保存]{X} Markdown报告: {md_path.absolute()}")
 
         return final_state

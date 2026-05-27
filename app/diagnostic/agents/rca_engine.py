@@ -113,6 +113,40 @@ class RCAEngine:
         
         logger.info(f"[RCAEngine] 初始化完成, min_confidence={self._config.min_confidence}, verbose={self._config.verbose}")
     
+    def _observation_message(self, content: str) -> dict[str, str]:
+        return {"role": "user", "content": content}
+
+    def _assistant_message_from_response(self, response: Any) -> dict[str, Any]:
+        content = getattr(response, "content", "") or ""
+        message: dict[str, Any] = {"role": "assistant", "content": content}
+        tool_calls = getattr(response, "tool_calls", None)
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        raw = getattr(response, "raw", None)
+        if isinstance(raw, dict):
+            choices = raw.get("choices")
+            if isinstance(choices, list) and choices:
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    raw_message = first_choice.get("message")
+                    if isinstance(raw_message, dict):
+                        reasoning_content = raw_message.get("reasoning_content")
+                        if isinstance(reasoning_content, str) and reasoning_content:
+                            message["reasoning_content"] = reasoning_content
+        return message
+
+    def _parse_tool_call(self, tool_call: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+        func = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        action = func.get("name")
+        args_str = func.get("arguments", "{}")
+        try:
+            action_input = json.loads(args_str)
+        except Exception:
+            action_input = {"query": args_str}
+        if not isinstance(action_input, dict):
+            action_input = {"query": action_input}
+        return action, action_input
+
     def _emit(self, category: str, message: str, detail: Any = None) -> None:
         """统一终端日志输出（verbose模式）"""
         if not self._config.verbose:
@@ -362,32 +396,14 @@ class RCAEngine:
             )
             
             assistant_message = response.content
-            
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                messages.append({
-                    "role": "assistant", 
-                    "content": assistant_message,
-                    "tool_calls": response.tool_calls
-                })
-            else:
-                messages.append({"role": "assistant", "content": assistant_message})
+            messages.append(self._assistant_message_from_response(response))
             
             parsed = self._parse_react_response(assistant_message)
             
             # 兼容原生 tool calling
             if hasattr(response, "tool_calls") and response.tool_calls:
-                # 假设只处理第一个 tool call
                 tool_call = response.tool_calls[0]
-                # tool_call 格式: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "..."}}
-                func = tool_call.get("function", {})
-                parsed["action"] = func.get("name")
-                args_str = func.get("arguments", "{}")
-                try:
-                    parsed["action_input"] = json.loads(args_str)
-                except:
-                    parsed["action_input"] = {"query": args_str}
-                
-                # 如果有 tool_calls，确保 content 有内容，否则加点占位符
+                parsed["action"], parsed["action_input"] = self._parse_tool_call(tool_call)
                 if not parsed["thought"] and not assistant_message:
                     parsed["thought"] = f"Calling tool {parsed['action']}"
             else:
@@ -430,11 +446,7 @@ class RCAEngine:
                         )
                         self._emit("action", f"召回延迟DTC(ECU={seed_ecu}) | 结果={str(recall_obs)[:100]}")
                         messages.append(
-                            {
-                                "role": "tool",
-                                "name": "recall_deferred_dtcs",
-                                "content": str(recall_obs),
-                            }
+                            self._observation_message(f"Observation: recall_deferred_dtcs({seed_ecu}) => {recall_obs}")
                         )
                         deferred_recalled = True
                         step_count += 1
@@ -514,6 +526,89 @@ class RCAEngine:
                 }
             
             if parsed["action"] and parsed["action_input"]:
+                native_tool_calls = response.tool_calls if hasattr(response, "tool_calls") and response.tool_calls else []
+                pending_actions: list[tuple[dict[str, Any] | None, str, dict[str, Any]]] = []
+                if native_tool_calls:
+                    for tool_call in native_tool_calls:
+                        action, action_input = self._parse_tool_call(tool_call)
+                        if action:
+                            pending_actions.append((tool_call, action, action_input))
+                else:
+                    pending_actions.append((None, parsed["action"], parsed["action_input"]))
+
+                if len(pending_actions) > 1:
+                    observations: list[tuple[dict[str, Any] | None, str, dict[str, Any], str]] = []
+                    for action_index, (tool_call, action, action_input) in enumerate(pending_actions, start=1):
+                        steps.append(f"Action: {action}({action_input})")
+                        _push_trace(
+                            {
+                                "type": "react_action",
+                                "iteration": step_count + 1,
+                                "tool": action,
+                                "input": action_input,
+                            }
+                        )
+                        self._emit("action", f"Iter{step_count+1} è°ƒç”¨å·¥å…·: {action} | è¾“å…¥={str(action_input)[:150]}")
+
+                        observation = await self._execute_tool(action, action_input, state)
+                        observation_text = str(observation)
+                        observations.append((tool_call, action, action_input, observation_text))
+                        steps.append(f"Observation: {self._truncate_str(observation_text, _MAX_OBSERVATION_CHARS)}")
+                        _push_trace(
+                            {
+                                "type": "tool_call",
+                                "iteration": step_count + 1,
+                                "tool": action,
+                                "input": action_input,
+                                "observation": observation_text[:1200],
+                            }
+                        )
+                        self._emit("observation", f"Iter{step_count+1} å·¥å…·ç»“æžœ({action}): {observation_text[:200]}")
+                        evidence_graph["nodes"].append(
+                            self._make_node(
+                                node_id=f"obs_{step_count + 1}_{action_index}",
+                                node_type="TIMELINE",
+                                label=f"Observation {step_count + 1}.{action_index}",
+                                attributes={
+                                    "tool": action,
+                                    "observation": observation_text[:400],
+                                    "iteration": step_count + 1,
+                                },
+                            )
+                        )
+                        self._enrich_evidence_graph_from_observation(
+                            state=state,
+                            evidence_graph=evidence_graph,
+                            action=action,
+                            action_input=action_input,
+                            observation=observation_text,
+                        )
+
+                    confidence_candidate = max(
+                        [self._estimate_confidence_from_observation(observation, before_conf) for _, _, _, observation in observations],
+                        default=float(before_conf or 0.0),
+                    )
+                    confidence_history.append(
+                        {
+                            "iteration": step_count + 1,
+                            "confidence": confidence_candidate,
+                            "confidence_delta": round(confidence_candidate - float(before_conf or 0.0), 6),
+                            "tools_used": [action for _, action, _, _ in observations],
+                            "new_evidence_count": len(observations),
+                        }
+                    )
+                    self._emit("confidence", f"Iter{step_count+1} ç½®ä¿¡åº¦æ›´æ–°: {before_conf:.3f} â†’ {confidence_candidate:.3f} (Î”={confidence_candidate - float(before_conf or 0.0):+.4f})")
+
+                    for tool_call, action, _action_input, observation in observations:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.get("id") if tool_call else None,
+                            "name": action,
+                            "content": observation,
+                        })
+                    step_count += 1
+                    continue
+
                 steps.append(f"Action: {parsed['action']}({parsed['action_input']})")
                 _push_trace(
                     {
@@ -583,7 +678,7 @@ class RCAEngine:
                         "content": str(observation)
                     })
                 else:
-                    messages.append({"role": "tool", "name": parsed["action"], "content": f"Observation: {observation}"})
+                    messages.append(self._observation_message(f"Observation: {observation}"))
                     
                 step_count += 1
             else:
@@ -1259,13 +1354,7 @@ class RCAEngine:
             obs_str = str(observation)
             lean_obs = self._summarize_dtc_observation(obs_str)
             steps.append(f"Observation: preload query_dtc({query_code}) => {lean_obs}")
-            messages.append(
-                {
-                    "role": "tool",
-                    "name": "query_dtc",
-                    "content": f"Observation: preload query_dtc({query_code}) => {observation}",
-                }
-            )
+            messages.append(self._observation_message(f"Observation: preload query_dtc({query_code}) => {observation}"))
 
         ecu_ids = [d.get("ecu_id") for d in sampled if d.get("ecu_id")]
         if len(ecu_ids) >= 2:
@@ -1280,11 +1369,9 @@ class RCAEngine:
             lean_obs = self._truncate_str(obs_str, _MAX_OBSERVATION_CHARS)
             steps.append(f"Observation: preload check_ecu_hop_distance({source_ecu},{target_ecu}) => {lean_obs}")
             messages.append(
-                {
-                    "role": "tool",
-                    "name": "check_ecu_hop_distance",
-                    "content": f"Observation: preload check_ecu_hop_distance({source_ecu},{target_ecu}) => {observation}",
-                }
+                self._observation_message(
+                    f"Observation: preload check_ecu_hop_distance({source_ecu},{target_ecu}) => {observation}"
+                )
             )
         return steps, messages
     

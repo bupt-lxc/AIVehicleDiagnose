@@ -1,93 +1,150 @@
-# AI_Disgnostic
+# AI Diagnostic
 
+基于 LangGraph 的车辆故障诊断引擎，使用 LLM (DeepSeek / 通义千问) 进行电检报告解析、拓扑构建、RAG 知识检索和 ReAct 根因推理。
 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## 架构
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.onedevops.vw.com.cn/uxvn331/ai_disgnostic.git
-git branch -M main
-git push -uf origin main
+XML 电检报告
+    │
+    ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Parser      │───▶│ DTC Focus    │───▶│  Surveyor    │
+│  解析XML     │    │ 优先级筛选    │    │ 拓扑图构建    │
+└──────────────┘    └──────────────┘    └──────────────┘
+                                                │
+    ┌──────────────┐    ┌──────────────┐        ▼
+    │  Report      │◀───│  Auditor     │◀──┌──────────────┐
+    │  Generator   │    │  逻辑审计     │   │  RCA Engine  │
+    │  Markdown输出 │    └──────────────┘   │  ReAct 推理   │
+    └──────────────┘                       └──────────────┘
+                                                  │
+                                                  ▼
+                                          ┌──────────────┐
+                                          │ MCP Librarian│
+                                          │ 知识库检索    │
+                                          └──────────────┘
 ```
 
-## Integrate with your tools
+## 功能
 
-- [ ] [Set up project integrations](https://gitlab.onedevops.vw.com.cn/uxvn331/ai_disgnostic/-/settings/integrations)
+- **XML 电检报告解析**: 自动解析 ODX/PDX 格式的诊断报告，提取 ECU 状态、DTC 码、冻结帧
+- **DTC 优先级筛选**: 根据严重程度、事件类型和用户上下文自动聚焦关键 DTC
+- **车辆拓扑构建**: 从 SQLite 拓扑数据库查询 ECU 通信关系和跳数距离
+- **ReAct 根因推理**: LLM 驱动的多轮推理循环，支持工具调用 (query_dtc, check_ecu_hop_distance 等)
+- **HITL 人工介入**: 低置信度、审计冲突、报告审批节点支持交互式人工决策
+- **审计检查**: 自动验证根因 ECU 拓扑一致性、DTC 覆盖率和证据闭环
+- **双模式知识检索**: 支持 RAG 服务端检索和本地 DTC 数据库降级查询
+- **多模型回退**: DeepSeek API 调用失败时自动尝试回退模型链
 
-## Collaborate with your team
+## 快速开始
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### 环境要求
 
-## Test and Deploy
+- Python >= 3.10
+- SQLite 拓扑数据库 (`vehicle_info/vehicle_architecture.db`)
 
-Use the built-in continuous integration in GitLab.
+### 安装
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+```bash
+pip install -r requirements.txt
+```
 
-***
+### 配置
 
-# Editing this README
+复制 `.env.example` 为 `.env` 并填写 API Key:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```env
+# DeepSeek API (OpenAI 兼容)
+ONLINE_LLM_BASE_URL=https://api.deepseek.com
+ONLINE_LLM_API_KEY=sk-your-deepseek-api-key
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key
+ONLINE_LLM_MODEL=deepseek-v4-pro
 
-## Suggestions for a good README
+# 或使用阿里云通义千问
+# ONLINE_LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+# ONLINE_LLM_API_KEY=sk-your-dashscope-key
+# ONLINE_LLM_MODEL=qwen-plus
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+# RAG 服务 (可选，不配置则使用本地 DTC 数据库降级)
+RAG_SERVER_URL=http://localhost:7300
 
-## Name
-Choose a self-explaining name for your project.
+# 拓扑数据库路径
+TOPOLOGY_DB_PATH=vehicle_info/vehicle_architecture.db
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### 运行
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+# 交互模式 (默认)
+python run_interactive.py testing/test1.xml
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+# 自动模式 (无需人工确认)
+python run_interactive.py testing/test1.xml --auto
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+# 附加上下文描述
+python run_interactive.py testing/test1.xml -c "车辆行驶中碰撞预警灯亮起"
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 输出
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+- `logs/diagnostic_report.md` — 结构化 Markdown 诊断报告
+- `logs/interactive_diagnostic_report.json` — 完整诊断状态快照
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## 项目结构
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```
+├── app/
+│   ├── config.py              # 配置与 Settings 加载
+│   ├── providers.py           # LLM Provider (OpenAI 兼容 + 多模型回退)
+│   ├── diagnostic/
+│   │   ├── agents/            # 各阶段 Agent (Parser, Surveyor, RCA, Auditor, Report)
+│   │   ├── tools/             # 工具注册与实现 (DTC查询, 拓扑跳距等)
+│   │   ├── prompts/           # Prompt 模板注册
+│   │   ├── hitl/              # Human-in-the-Loop 处理器
+│   │   ├── graph.py           # LangGraph 状态图定义
+│   │   ├── state.py           # 诊断状态 TypedDict
+│   │   ├── prioritizer.py     # DTC 优先级引擎
+│   │   └── validators.py      # 输入验证
+│   ├── topology/              # 拓扑数据库 ORM 与查询
+│   └── rag_client.py          # RAG 服务客户端
+├── tests/                     # 单元测试
+├── vehicle_info/              # 拓扑 SQLite 数据库
+├── testing/                   # 测试用 XML 电检报告
+├── run_interactive.py         # 交互式主入口
+└── requirements.txt
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## 关键特性
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### 跳过 RAG 离线运行
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+当 RAG 服务不可用时，`LocalMCPLibrarianAgent` 自动使用本地 DTC 数据库降级:
+
+```python
+# run_interactive.py 中已配置
+class LocalMCPLibrarianAgent(MCPLibrarianAgent):
+    async def retrieve(self, state):
+        # 直接从本地 dtc_database 查询 DTC 定义
+        ...
+```
+
+### DeepSeek 多模型回退
+
+`app/providers.py` 中的 `OpenAICompatibleProvider` 在 API 返回模型不可用/配额耗尽等错误时，自动按以下优先级尝试回退模型:
+
+1. 配置的 `ONLINE_LLM_MODEL`
+2. `ONLINE_LLM_FALLBACK_MODELS` 环境变量指定的模型列表
+3. DeepSeek: `deepseek-v4-flash` / 通义千问: `qwen-turbo → qwen-max → qwen-plus`
+
+### HITL 自动批准
+
+`--auto` 模式下，HITL (Human-in-the-Loop) 节点自动放行:
+- `hitl_parse_confirm`: 跳过解析确认
+- `hitl_low_confidence`: 直接进入审计
+- `hitl_audit_conflict`: 跳过冲突处理
+- `hitl_report_approval`: 自动批准报告
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Proprietary — Audi / VW Group internal tool.
